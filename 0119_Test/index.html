@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arduino LED 모니터링 시스템 Test</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .connection-panel {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        select, button {
+            padding: 12px 20px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        select {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status-display {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .led-indicator {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: #ddd;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+        }
+
+        .led-indicator.on {
+            background: #4CAF50;
+            box-shadow: 0 0 40px #4CAF50;
+        }
+
+        .led-indicator.off {
+            background: #f44336;
+            box-shadow: 0 0 40px #f44336;
+        }
+
+        .status-text {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .control-buttons button {
+            flex: 1;
+            padding: 20px;
+            font-size: 18px;
+        }
+
+        .btn-on {
+            background: #4CAF50;
+        }
+
+        .btn-on:hover {
+            background: #45a049;
+        }
+
+        .btn-off {
+            background: #f44336;
+        }
+
+        .btn-off:hover {
+            background: #da190b;
+        }
+
+        .chart-container {
+            position: relative;
+            height: 400px;
+            margin: 20px 0;
+        }
+
+        .log-box {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            height: 200px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .log-entry {
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-time {
+            color: #666;
+            margin-right: 10px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Arduino LED 실시간 모니터링 Test</h1>
+
+        <!-- 연결 패널 -->
+        <div class="card">
+            <h2>연결 설정</h2>
+            <div class="connection-panel">
+                <select id="portSelect">
+                    <option value="">포트를 선택하세요...</option>
+                </select>
+                <button onclick="refreshPorts()">새로고침</button>
+                <button id="connectBtn" onclick="toggleConnection()">연결</button>
+            </div>
+        </div>
+
+        <!-- LED 제어 및 상태 -->
+        <div class="card">
+            <h2>LED 제어</h2>
+            <div class="status-display">
+                <div id="ledIndicator" class="led-indicator"></div>
+                <div class="status-text" id="statusText">연결 안됨</div>
+            </div>
+            <div class="control-buttons">
+                <button class="btn-on" onclick="sendCommand('ON')" id="btnOn" disabled>LED ON</button>
+                <button class="btn-off" onclick="sendCommand('OFF')" id="btnOff" disabled>LED OFF</button>
+            </div>
+        </div>
+
+        <!-- 그래프 -->
+        <div class="grid">
+            <div class="card">
+                <h2>LED 상태 그래프</h2>
+                <div class="chart-container">
+                    <canvas id="ledChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>센서 데이터 그래프</h2>
+                <div class="chart-container">
+                    <canvas id="sensorChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 로그 -->
+        <div class="card">
+            <h2>로그</h2>
+            <div class="log-box" id="logBox"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let isConnected = false;
+
+        // 차트 설정
+        const ledChartCtx = document.getElementById('ledChart').getContext('2d');
+        const sensorChartCtx = document.getElementById('sensorChart').getContext('2d');
+
+        const ledChart = new Chart(ledChartCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'LED 상태',
+                    data: [],
+                    borderColor: '#4CAF50',
+                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.1,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 1,
+                        ticks: {
+                            stepSize: 1
+                        }
+                    },
+                    x: {
+                        display: false
+                    }
+                },
+                animation: false
+            }
+        });
+
+        const sensorChart = new Chart(sensorChartCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: '센서 값',
+                    data: [],
+                    borderColor: '#2196F3',
+                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 1023
+                    },
+                    x: {
+                        display: false
+                    }
+                },
+                animation: false
+            }
+        });
+
+        // 페이지 로드 시 포트 목록 가져오기
+        window.onload = () => {
+            refreshPorts();
+        };
+
+        // 포트 목록 새로고침
+        async function refreshPorts() {
+            try {
+                const response = await fetch('/api/ports');
+                const ports = await response.json();
+                const select = document.getElementById('portSelect');
+                select.innerHTML = '<option value="">포트를 선택하세요...</option>';
+                ports.forEach(port => {
+                    const option = document.createElement('option');
+                    option.value = port.port;
+                    option.textContent = `${port.port} - ${port.description}`;
+                    select.appendChild(option);
+                });
+                addLog('포트 목록 업데이트됨');
+            } catch (error) {
+                addLog('포트 목록 가져오기 실패: ' + error);
+            }
+        }
+
+        // 연결/연결 해제 토글
+        async function toggleConnection() {
+            if (isConnected) {
+                await disconnect();
+            } else {
+                await connect();
+            }
+        }
+
+        // 연결
+        async function connect() {
+            const port = document.getElementById('portSelect').value;
+            if (!port) {
+                alert('포트를 선택해주세요');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/connect', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({port})
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    isConnected = true;
+                    document.getElementById('connectBtn').textContent = '연결 해제';
+                    document.getElementById('connectBtn').style.background = '#f44336';
+                    document.getElementById('btnOn').disabled = false;
+                    document.getElementById('btnOff').disabled = false;
+                    addLog(result.message);
+                } else {
+                    alert(result.message);
+                }
+            } catch (error) {
+                alert('연결 실패: ' + error);
+            }
+        }
+
+        // 연결 해제
+        async function disconnect() {
+            try {
+                const response = await fetch('/api/disconnect', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+
+                isConnected = false;
+                document.getElementById('connectBtn').textContent = '연결';
+                document.getElementById('connectBtn').style.background = '#667eea';
+                document.getElementById('btnOn').disabled = true;
+                document.getElementById('btnOff').disabled = true;
+                document.getElementById('statusText').textContent = '연결 안됨';
+                document.getElementById('ledIndicator').className = 'led-indicator';
+                addLog(result.message);
+            } catch (error) {
+                alert('연결 해제 실패: ' + error);
+            }
+        }
+
+        // 명령 전송
+        async function sendCommand(command) {
+            try {
+                const response = await fetch('/api/command', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({command})
+                });
+                const result = await response.json();
+                addLog(result.message);
+            } catch (error) {
+                addLog('명령 전송 실패: ' + error);
+            }
+        }
+
+        // 소켓 이벤트 리스너
+        socket.on('sensor_data', (data) => {
+            // LED 상태 업데이트
+            updateStatus(data.led === 1 ? 'ON' : 'OFF');
+
+            // 그래프 업데이트
+            const time = new Date().toLocaleTimeString();
+
+            // LED 차트
+            if (ledChart.data.labels.length > 50) {
+                ledChart.data.labels.shift();
+                ledChart.data.datasets[0].data.shift();
+            }
+            ledChart.data.labels.push(time);
+            ledChart.data.datasets[0].data.push(data.led);
+            ledChart.update();
+
+            // 센서 차트
+            if (sensorChart.data.labels.length > 50) {
+                sensorChart.data.labels.shift();
+                sensorChart.data.datasets[0].data.shift();
+            }
+            sensorChart.data.labels.push(time);
+            sensorChart.data.datasets[0].data.push(data.sensor);
+            sensorChart.update();
+        });
+
+        socket.on('status_update', (data) => {
+            updateStatus(data.status);
+        });
+
+        socket.on('message', (data) => {
+            addLog(data.msg);
+        });
+
+        socket.on('error', (data) => {
+            addLog('에러: ' + data.msg);
+        });
+
+        // 상태 업데이트
+        function updateStatus(status) {
+            const indicator = document.getElementById('ledIndicator');
+            const text = document.getElementById('statusText');
+
+            text.textContent = '상태: ' + status;
+            indicator.className = 'led-indicator ' + status.toLowerCase();
+        }
+
+        // 로그 추가
+        function addLog(message) {
+            const logBox = document.getElementById('logBox');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="log-time">[${time}]</span>${message}`;
+            logBox.appendChild(entry);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
